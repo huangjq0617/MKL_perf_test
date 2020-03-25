@@ -1,6 +1,6 @@
 #include <iostream>
-#include <ctime>
-#include <sys/time.h>
+#include <chrono>
+#include <thread>
 
 #include <blaze/Math.h>
 
@@ -26,14 +26,6 @@ typedef blaze::CustomMatrix<float, blaze::unaligned,
 
 typedef blaze::DynamicMatrix<float, blaze::rowMajor> Matrix;
 
-
-inline long getTimeTT()
-{
-    struct timeval iTime;
-    gettimeofday(&iTime, NULL);
-    long lTime = ((long) iTime.tv_sec) * 1000000 + (long) iTime.tv_usec;
-    return lTime;
-}
 
 union combine {
   short x[sizeof(__m256i)/sizeof(short)];
@@ -81,18 +73,17 @@ void TransposeMatrix(const float *in, float *out, int orig_rows, int orig_cols)
     }
 }
 
-
 #define MATRIX_B_NUM    1
 
 int main(int argc, char *argv[])
 {
 
     int system = 0;
-    int loopNum = 40000;
+    int loopNum = 1;
 
-    int num_A_rows = 7;
-    int num_B_rows = 1280;
-    int width = 1280;
+    int num_A_rows = 81;
+    int num_B_rows = 220;
+    int width = 220;
 
     if (argc > 1) {
         system = atoi(argv[1]);
@@ -141,6 +132,7 @@ int main(int argc, char *argv[])
 
 #endif // > 1
 
+
     float * A = new float[num_A_rows*width];
 
 
@@ -185,7 +177,7 @@ int main(int argc, char *argv[])
         fast_C = new float[num_A_rows*num_B_rows];
         memset(fast_C, 0, sizeof(float)*num_A_rows*num_B_rows);
 
-        long start = getTimeTT();
+        auto start_time = std::chrono::high_resolution_clock::now();
 
         // Each __m128i fits 8 16-bit integers, so we assume the width is a multiple of 8.
         // We could pad with 0 in the general case.
@@ -278,7 +270,8 @@ int main(int argc, char *argv[])
 #endif // > 1
         }
 
-        long cost = (getTimeTT() - start) / 1000; //ms
+        auto end_time = std::chrono::high_resolution_clock::now();
+        auto cost = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
 
         cout << "avx2 cost time:  " << cost << "ms, flops: " << 1.0 * loopNum * num_A_rows * num_B_rows * width * MATRIX_B_NUM / cost / 1000000 << " GFLOPS" << endl;
 
@@ -293,33 +286,35 @@ int main(int argc, char *argv[])
     // // MKL
     float * ref_C = new float[num_A_rows*num_B_rows];
 
-    float * B2 = new float[num_B_rows * width];
-    TransposeMatrix(B, B2, width, num_B_rows);
+    float * B_T = new float[num_B_rows * width];
+    TransposeMatrix(B, B_T, width, num_B_rows);
     float * ref_C_2 = new float[num_A_rows*num_B_rows];
 
     if (0 == system || 2 == system) {
 
         // C will thus be num_A_rows x num_B_rows
-
         memset(ref_C, 0, sizeof(float)*num_A_rows*num_B_rows);
-
-        long start1 = getTimeTT();
+        auto start1 = std::chrono::high_resolution_clock::now();
         for (int i = 0; i < loopNum; i++) {
             // std::cerr << CblasRowMajor << ", " << CblasNoTrans << ", " << CblasNoTrans << ", " << num_A_rows << ", " << num_B_rows << ", " << width << ", " << 1 << ", " << width << ", " << num_B_rows << ", " << num_B_rows << std::endl;
 
             cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, num_A_rows, num_B_rows, width, 1, A, width, B, num_B_rows, 0, ref_C, num_B_rows);
         }
-        long cost1 = (getTimeTT() - start1) / 1000; //ms
+        auto end1 = std::chrono::high_resolution_clock::now();
+        long cost1 = std::chrono::duration_cast<std::chrono::microseconds>(end1 - start1).count();
 
-        long start2 = getTimeTT();
+        memset(ref_C, 0, sizeof(float)*num_A_rows*num_B_rows);
+        auto start2 = std::chrono::high_resolution_clock::now();
         for (int i = 0; i < loopNum; i++) {
 
-            cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasTrans, num_A_rows, num_B_rows, width, 1, A, width, B2, width, 0, ref_C_2, num_B_rows);
+            // cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasTrans, num_A_rows, num_B_rows, width, 1, A, width, B_T, width, 0, ref_C_2, num_B_rows);
+            cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasTrans, num_A_rows, num_B_rows, width, 1, A, width, B, width, 0, ref_C_2, num_B_rows);
         }
-        long cost2 = (getTimeTT() - start2) / 1000; //ms
+        auto end2 = std::chrono::high_resolution_clock::now();
+        long cost2 = std::chrono::duration_cast<std::chrono::microseconds>(end2 - start2).count();
 
-        cout << "mkl  cost time1: " << cost1 << "ms, flops: " << 1.0 * loopNum * num_A_rows * num_B_rows * width * MATRIX_B_NUM / cost1 / 1000000 << " GFLOPS" << endl;
-        cout << "mkl  cost time2: " << cost2 << "ms, flops: " << 1.0 * loopNum * num_A_rows * num_B_rows * width * MATRIX_B_NUM / cost2 / 1000000 << " GFLOPS" << endl;
+        cout << "mkl cost notrans: " << cost1 << " micro seconds, flops: " << 1.0 * loopNum * num_A_rows * num_B_rows * width * MATRIX_B_NUM / cost1 / 1000000 << " GFLOPS" << endl;
+        cout << "mkl cost trans: " << cost2 << " micro seconds, flops: " << 1.0 * loopNum * num_A_rows * num_B_rows * width * MATRIX_B_NUM / cost2 / 1000000 << " GFLOPS" << endl;
 
         // for (int i = 0; i < num_A_rows; i++) {
         //     for (int j = 0; j < num_B_rows; j++) {
@@ -372,7 +367,7 @@ int main(int argc, char *argv[])
     Matrix matrixC;
     if (0 == system || 3 == system) {
 
-        long start = getTimeTT();
+        auto start_time = std::chrono::high_resolution_clock::now();
         Matrix matrixA = BlazeWrapper(A, num_A_rows, width);
         Matrix matrixB = blaze::trans(BlazeWrapper(B, num_B_rows, width));
 
@@ -417,8 +412,8 @@ int main(int argc, char *argv[])
 #endif // > 1
         }
 
-        long cost = (getTimeTT() - start) / 1000; //ms
-
+        auto end_time = std::chrono::high_resolution_clock::now();
+        auto cost = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time).count();
         cout << "blaze cost time: " << cost << "ms, flops: " << 1.0 * loopNum * num_A_rows * num_B_rows * width * MATRIX_B_NUM / cost / 1000000 << " GFLOPS" << endl;
 
         // for (int i = 0; i < matrixC.rows(); i++) {
@@ -436,7 +431,7 @@ int main(int argc, char *argv[])
         for (int i = 0; i < num_A_rows; i++) {
             for (int j = 0; j < num_B_rows; j++) {
                 float f = fast_C[i*num_B_rows + j];
-                // float f = ref_C[i*num_B_rows + j];
+                // float f = ref_C_2[i*num_B_rows + j];
                 float r = matrixC(i, j);
                 double diff = fabs(r-f);
                 if (diff > max_diff) {

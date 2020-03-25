@@ -17,6 +17,6 @@ if(BUILD_STATIC)
 endif(BUILD_STATIC)
 
 include_directories(/opt/intel/mkl/include)
-link_libraries("/opt/intel/mkl/lib/intel64/libmkl_intel_lp64.so" "/opt/intel/mkl/lib/intel64/libmkl_intel_thread.so" "/opt/intel/mkl/lib/intel64/libmkl_core.so" iomp5 pthread m dl python2.7)
+link_libraries("/opt/intel/mkl/lib/intel64/libmkl_intel_lp64.so" "/opt/intel/mkl/lib/intel64/libmkl_intel_thread.so" "/opt/intel/mkl/lib/intel64/libmkl_core.so" iomp5 pthread m dl)
 
 add_subdirectory(src)
